@@ -70,13 +70,14 @@ def read_headers(text):
         yield match.group(1), match.group(2), match.end()
 
 
-def rfc_2822_format(date_str):
+def format_date(date_str, date_format='%a, %d %b %Y %H:%M:%S +0000'):
     """Convert yyyy-mm-dd date string to RFC 2822 format date string."""
     d = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-    return d.strftime('%a, %d %b %Y %H:%M:%S +0000')
+    return d.strftime(date_format)
 
 
 def read_content(filename):
+    global params
     """Read content and metadata from file into a dictionary."""
     # Read file content.
     text = fread(filename)
@@ -100,8 +101,6 @@ def read_content(filename):
     # Convert Markdown content to HTML.
     if filename.endswith(('.md', '.mkd', '.mkdn', '.mdown', '.markdown')):
         try:
-            if _test == 'ImportError':
-                raise ImportError('Error forced by test')
             import commonmark
             text = commonmark.commonmark(text)
         except ImportError as e:
@@ -110,7 +109,8 @@ def read_content(filename):
     # Update the dictionary with content and RFC 2822 date.
     content.update({
         'content': text,
-        'rfc_2822_date': rfc_2822_format(content['date'])
+        'pretty_date':format_date(content['date'], params['pretty_date_format']),
+        'rfc_2822_date': format_date(content['date'])
     })
 
     return content
@@ -167,16 +167,16 @@ def make_list(posts, dst, list_layout, item_layout, **params):
 
 
 def main():
-    # Create a new _site directory from scratch.
-    if os.path.isdir('_site'):
-        shutil.rmtree('_site')
-    shutil.copytree('static', '_site')
-
+    global params
     # Default parameters.
     params = {
         'base_path': '',
-        'subtitle': 'Lorem Ipsum',
+        'site_title':'Lorem Ipsum',
+        'subtitle': 'Dolor sit amet',
+        'output_dir':'_site',
+        'theme':'default',
         'author': 'Admin',
+        'pretty_date_format':'%d %b %Y',
         'site_url': 'http://localhost:8000',
         'current_year': datetime.datetime.now().year
     }
@@ -185,48 +185,56 @@ def main():
     if os.path.isfile('params.json'):
         params.update(json.loads(fread('params.json')))
 
+    if not os.path.exists('themes/'+params['theme']):
+        raise FileNotFoundError("Theme folder '{0}' not found in /themes".format(params['theme']))
+    else:
+        theme_path = 'themes/'+params['theme']+'/'
+
+    # Create a new output directory from scratch.
+    if os.path.isdir(params['output_dir']):
+        shutil.rmtree(params['output_dir'])
+
+    shutil.copytree('static', params['output_dir'])
+    
+    if os.path.exists(theme_path+'static'):
+        shutil.copytree(theme_path+'static', params['output_dir']+'/'+params['theme'])
+
     # Load layouts.
-    page_layout = fread('layout/page.html')
-    post_layout = fread('layout/post.html')
-    list_layout = fread('layout/list.html')
-    item_layout = fread('layout/item.html')
-    feed_xml = fread('layout/feed.xml')
-    item_xml = fread('layout/item.xml')
+    try:
+        page_layout = fread(theme_path+'page.html')
+        post_layout = fread(theme_path+'post.html')
+        list_layout = fread(theme_path+'list.html')
+        item_layout = fread(theme_path+'item.html')
+        feed_xml = fread(theme_path+'feed.xml')
+        item_xml = fread(theme_path+'item.xml')
+    except FileNotFoundError as e:
+        raise FileNotFoundError(e)
 
     # Combine layouts to form final layouts.
     post_layout = render(page_layout, content=post_layout)
     list_layout = render(page_layout, content=list_layout)
 
     # Create site pages.
-    make_pages('content/_index.html', '_site/index.html',
+    make_pages('content/_index.html', str(params['output_dir']+'/index.html'),
                page_layout, **params)
-    make_pages('content/[!_]*.html', '_site/{{ slug }}/index.html',
+    make_pages('content/[!_]*.html', str(params['output_dir']+'/{{ slug }}/index.html'),
                page_layout, **params)
 
     # Create blogs.
     blog_posts = make_pages('content/blog/*.md',
-                            '_site/blog/{{ slug }}/index.html',
+                            str(params['output_dir']+'/blog/{{ slug }}/index.html'),
                             post_layout, blog='blog', **params)
-    news_posts = make_pages('content/news/*.html',
-                            '_site/news/{{ slug }}/index.html',
-                            post_layout, blog='news', **params)
 
     # Create blog list pages.
-    make_list(blog_posts, '_site/blog/index.html',
+    make_list(blog_posts, str(params['output_dir']+'/blog/index.html'),
               list_layout, item_layout, blog='blog', title='Blog', **params)
-    make_list(news_posts, '_site/news/index.html',
-              list_layout, item_layout, blog='news', title='News', **params)
 
     # Create RSS feeds.
-    make_list(blog_posts, '_site/blog/rss.xml',
+    make_list(blog_posts, str(params['output_dir']+'/blog/rss.xml'),
               feed_xml, item_xml, blog='blog', title='Blog', **params)
-    make_list(news_posts, '_site/news/rss.xml',
-              feed_xml, item_xml, blog='news', title='News', **params)
-
 
 # Test parameter to be set temporarily by unit tests.
-_test = None
-
+params = {}
 
 if __name__ == '__main__':
     main()
